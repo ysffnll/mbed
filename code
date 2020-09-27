@@ -1,0 +1,217 @@
+#include "mbed.h"
+#include "mbed_trace.h"
+#include "NetworkInterface.h"
+#include "TCPSocket.h"
+#include "https_request.h"
+#include "mbed_events.h"
+#include "string.h"
+/* List of trusted root CA certificates
+ * currently one: Amazon, the CA for httpbin.org
+ *
+ * To add more root certificates, just concatenate them.
+ */
+const char SSL_CA_PEM[] = "-----BEGIN CERTIFICATE-----\n"
+"MIIF3jCCA8agAwIBAgIQAf1tMPyjylGoG7xkDjUDLTANBgkqhkiG9w0BAQwFADCB\n"
+"iDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0pl\n"
+"cnNleSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNV\n"
+"BAMTJVVTRVJUcnVzdCBSU0EgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMTAw\n"
+"MjAxMDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBiDELMAkGA1UEBhMCVVMxEzARBgNV\n"
+"BAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNleSBDaXR5MR4wHAYDVQQKExVU\n"
+"aGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMTJVVTRVJUcnVzdCBSU0EgQ2Vy\n"
+"dGlmaWNhdGlvbiBBdXRob3JpdHkwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK\n"
+"AoICAQCAEmUXNg7D2wiz0KxXDXbtzSfTTK1Qg2HiqiBNCS1kCdzOiZ/MPans9s/B\n"
+"3PHTsdZ7NygRK0faOca8Ohm0X6a9fZ2jY0K2dvKpOyuR+OJv0OwWIJAJPuLodMkY\n"
+"tJHUYmTbf6MG8YgYapAiPLz+E/CHFHv25B+O1ORRxhFnRghRy4YUVD+8M/5+bJz/\n"
+"Fp0YvVGONaanZshyZ9shZrHUm3gDwFA66Mzw3LyeTP6vBZY1H1dat//O+T23LLb2\n"
+"VN3I5xI6Ta5MirdcmrS3ID3KfyI0rn47aGYBROcBTkZTmzNg95S+UzeQc0PzMsNT\n"
+"79uq/nROacdrjGCT3sTHDN/hMq7MkztReJVni+49Vv4M0GkPGw/zJSZrM233bkf6\n"
+"c0Plfg6lZrEpfDKEY1WJxA3Bk1QwGROs0303p+tdOmw1XNtB1xLaqUkL39iAigmT\n"
+"Yo61Zs8liM2EuLE/pDkP2QKe6xJMlXzzawWpXhaDzLhn4ugTncxbgtNMs+1b/97l\n"
+"c6wjOy0AvzVVdAlJ2ElYGn+SNuZRkg7zJn0cTRe8yexDJtC/QV9AqURE9JnnV4ee\n"
+"UB9XVKg+/XRjL7FQZQnmWEIuQxpMtPAlR1n6BB6T1CZGSlCBst6+eLf8ZxXhyVeE\n"
+"Hg9j1uliutZfVS7qXMYoCAQlObgOK6nyTJccBz8NUvXt7y+CDwIDAQABo0IwQDAd\n"
+"BgNVHQ4EFgQUU3m/WqorSs9UgOHYm8Cd8rIDZsswDgYDVR0PAQH/BAQDAgEGMA8G\n"
+"A1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQEMBQADggIBAFzUfA3P9wF9QZllDHPF\n"
+"Up/L+M+ZBn8b2kMVn54CVVeWFPFSPCeHlCjtHzoBN6J2/FNQwISbxmtOuowhT6KO\n"
+"VWKR82kV2LyI48SqC/3vqOlLVSoGIG1VeCkZ7l8wXEskEVX/JJpuXior7gtNn3/3\n"
+"ATiUFJVDBwn7YKnuHKsSjKCaXqeYalltiz8I+8jRRa8YFWSQEg9zKC7F4iRO/Fjs\n"
+"8PRF/iKz6y+O0tlFYQXBl2+odnKPi4w2r78NBc5xjeambx9spnFixdjQg3IM8WcR\n"
+"iQycE0xyNN+81XHfqnHd4blsjDwSXWXavVcStkNr/+XeTWYRUc+ZruwXtuhxkYze\n"
+"Sf7dNXGiFSeUHM9h4ya7b6NnJSFd5t0dCy5oGzuCr+yDZ4XUmFF0sbmZgIn/f3gZ\n"
+"XHlKYC6SQK5MNyosycdiyA5d9zZbyuAlJQG03RoHnHcAP9Dc1ew91Pq7P8yF1m9/\n"
+"qS3fuQL39ZeatTXaw2ewh0qpKJ4jjv9cJ2vhsE/zB+4ALtRZh8tSQZXq9EfX7mRB\n"
+"VXyNWQKV3WKdwrnuWih0hKWbt5DHDAff9Yk2dDLWKMGwsAvgnEzDHNb842m1R0aB\n"
+"L6KCq9NjRHDEjf8tM7qtj3u1cIiuPhnPQCjY/MiQu12ZIvVS5ljFH4gxQ+6IHdfG\n"
+"jjxDah2nGN59PRbxYvnKkKj9\n"
+"-----END CERTIFICATE-----\n";
+
+
+
+
+
+
+double const notes[]= {27.50,30.87,16.35,18.35,20.60,21.83,24.50};
+EventQueue queue;
+
+double retArr1[10][2];
+double retArr2[10][2];
+PwmOut speaker1(p21);
+PwmOut speaker2(p22);
+int music1Len = 0;
+int music1Index = 0;
+int music2Len = 0;
+int music2Index = 0;
+
+void musicToArry(char* music,int no)
+{
+    double interval = 0;
+    double frequency = 0;
+    int i =0;
+    int j =0;
+    
+    for(i = 0; i<strlen(music); i+=4)
+    {
+        frequency = notes[((int)music[i])-65];
+        for(j = 0; j<(int)music[i+1]-48; j++)
+            frequency *=2;
+        interval = (((int)music[i+2])-48)*100 + (((int)music[i+3])-48)*10;
+        if(no == 1)
+        {
+            music1Len = strlen(music)/4;
+            retArr1[i/4][0] = (1.0 / frequency);
+            retArr1[i/4][1] = interval;
+        }
+        else if (no == 2)
+        {
+            music2Len = strlen(music)/4;
+            retArr2[i/4][0] = (1.0 / frequency);
+            retArr2[i/4][1] = interval;
+        }
+    }
+}
+
+void playMusic1()
+{
+    music1Index = music1Index%music1Len;
+    speaker1.period(retArr1[music1Index][0]);
+    queue.call_in(retArr1[music1Index][1], &playMusic1);
+    music1Index++;
+}
+
+void playMusic2()
+{
+    music2Index = music2Index%music2Len;
+    speaker2.period(retArr2[music2Index][0]);
+    queue.call_in(retArr2[music2Index][1], &playMusic2);
+    music2Index++;
+}
+
+char start[] = {'<','t','r','>','<','t','d',' ','a','l','i','g','n','=','c','e','n','t','e','r','>'};
+double notesFromWeb[100][2];
+char freqFromWeb[100];
+
+void dump_response(HttpResponse* res) {
+    mbedtls_printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
+
+    mbedtls_printf("Headers:\n");
+    for (size_t ix = 0; ix < res->get_headers_length(); ix++) {
+        mbedtls_printf("\t%s: %s\n", res->get_headers_fields()[ix]->c_str(), res->get_headers_values()[ix]->c_str());
+    }
+    mbedtls_printf("\nBody (%d bytes):\n\n%s\n", res->get_body_length(), res->get_body_as_string().c_str());
+    
+    char buffer[] = res->get_body();
+    int i = 0;
+    int j = 0;
+    int cont = 0;
+    double freqq = 0;
+    for (i= 0; i<strlen(buffer); i++)
+    {
+        cont = 0;
+        freqq = 0;
+        if(buffer[i-21]== start[0] && buffer[i-20] == start[1] && buffer[i-19]== start[2])
+            cont++;
+        if(buffer[i-18]== start[3] && buffer[i-17] == start[4] && buffer[i-16]== start[5])
+            cont++;
+        if(buffer[i-15]== start[6] && buffer[i-14] == start[7] && buffer[i-13]== start[8])
+            cont++;
+        if(buffer[i-12]== start[9] && buffer[i-11]== start[10] && buffer[i-10]==start[11])
+            cont++;
+        if( buffer[i-9]==start[12] &&  buffer[i-8]== start[13] &&  buffer[i-7]==start[14])
+            cont++;
+        if( buffer[i-6]==start[15] &&  buffer[i-5]== start[16] &&  buffer[i-4]==start[17])
+            cont++;
+        if( buffer[i-3]==start[18] &&  buffer[i-2]== start[19] &&  buffer[i-1]==start[20])
+            cont++;
+        if(cont == 7 && buffer[i] != '&')
+        {
+            notesFromWeb[j][0] = buffer[i];
+            notesFromWeb[j][1] = buffer[i+6];
+            if((int)buffer[i+34]>=48 && (int)buffer[i+34]<=57)
+                freqq += ((int)buffer[i+34]-48)*1000.0;
+            if((int)buffer[i+35]>=48 && (int)buffer[i+35]<=57)
+                freqq += ((int)buffer[i+34]-48)*100.0;
+            if((int)buffer[i+36]>=48 && (int)buffer[i+36]<=57)
+                freqq += ((int)buffer[i+34]-48)*10.0;
+            if((int)buffer[i+37]>=48 && (int)buffer[i+37]<=57)
+                freqq += ((int)buffer[i+34]-48)*1.0;
+            if((int)buffer[i+39]>=48 && (int)buffer[i+39]<=57)
+                freqq += ((int)buffer[i+34]-48)/10.0;
+            if((int)buffer[i+40]>=48 && (int)buffer[i+40]<=57)
+                freqq += ((int)buffer[i+34]-48)/100.0;
+            freqFromWeb[j] = freqq;
+            
+            printf("\n\n  %c%c, ---------------- %d \n",buffer[i],buffer[i+6],freqq);
+            j++;
+        }
+    }
+}
+
+
+
+void httpSS()
+{
+    NetworkInterface *network = NetworkInterface::get_default_instance();
+    if (network->connect() != 0) {
+        printf("Could not connect to the network...\n");
+        return 1;
+    }
+
+    mbed_trace_init();
+
+    // note that this example sets up a new TLS socket for every request... that's wasteful!
+    // you can set up a socket manually and pass it in, see the TLS Socket example
+
+    // GET request to httpbin.org
+    {
+        printf("\n----- HTTPS GET request -----\n");
+
+        HttpsRequest* get_req = new HttpsRequest(network, SSL_CA_PEM, HTTP_GET, "https://pages.mtu.edu/~suits/notefreqs.html");
+
+        HttpResponse* get_res = get_req->send();
+        if (!get_res) {
+            printf("HttpsRequest failed (error code %d)\n", get_req->get_error());
+            return 1;
+        }
+        printf("\n----- HTTPS GET response -----\n");
+        dump_response(get_res);
+
+        delete get_req;
+    }
+}
+
+int main() {
+    
+    httpSS();
+    
+    speaker1 = 0.1;
+    speaker2 = 0.1;
+    char* music1 = "A010B425C012A010B425C012A010B425C012";
+    musicToArry(music1,1);
+    char* music2 = "A040B415C002A060B445C022A050B455C060";
+    musicToArry(music2,2);
+    playMusic1();
+    playMusic2();
+    queue.dispatch_forever();
+    
+    wait(osWaitForever);
+}
